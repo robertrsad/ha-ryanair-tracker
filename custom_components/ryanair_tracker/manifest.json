@@ -1,9 +1,9 @@
 {
   "domain": "ryanair_tracker",
   "name": "Ryanair Price Tracker",
-  "codeowners": ["robertrsad"],
+  "codeowners": ["@robert"],
   "config_flow": true,
-  "documentation": "https://github.com/twoj_nick/ha-ryanair-tracker",
+  "documentation": "https://github.com/robertsad/ha-ryanair-tracker",
   "iot_class": "cloud_polling",
-  "version": "1.0.2"
+  "version": "1.0.4"
 }
