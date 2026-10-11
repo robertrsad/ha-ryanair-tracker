@@ -1,4 +1,4 @@
-"""Czujnik ceny Ryanair z obsługą waluty i błędów."""
+"""Czujnik ceny Ryanair."""
 from datetime import timedelta
 import logging
 import requests
@@ -10,9 +10,9 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     config = config_entry.data
-    origin = config["origin"].upper().strip()
-    destination = config["destination"].upper().strip()
-    date_out = config["date_out"].strip()
+    origin = config["origin"]
+    destination = config["destination"]
+    date_out = config["date_out"]
     interval = config.get("update_interval_minutes", 60)
 
     async def async_update_data():
@@ -21,9 +21,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             f"ADT=1&Discount=0&Origin={origin}&Destination={destination}&DateOut={date_out}&RoundTrip=false"
         )
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7"
+            "Accept-Language": "pl-PL,pl;q=0.9",
+            "client": "desktop",
+            "client-version": "3.100.0"
         }
 
         def fetch():
@@ -37,29 +39,27 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 trips = data.get("trips", [])
                 
                 prices = []
-                if trips and "dates" in trips[0]:
-                    for date_entry in trips[0]["dates"]:
-                        # Szukamy odczytów dla wybranego dnia
-                        if date_entry.get("dateOut", "").startswith(date_out):
-                            flights = date_entry.get("flights", [])
-                            for flight in flights:
-                                regular_fare = flight.get("regularFare")
-                                if regular_fare and "fares" in regular_fare:
-                                    for fare in regular_fare["fares"]:
-                                        if "amount" in fare:
-                                            prices.append(float(fare["amount"]))
+                if trips:
+                    for trip in trips:
+                        for date_entry in trip.get("dates", []):
+                            if date_entry.get("dateOut", "").startswith(date_out):
+                                for flight in date_entry.get("flights", []):
+                                    regular_fare = flight.get("regularFare")
+                                    if regular_fare and "fares" in regular_fare:
+                                        for fare in regular_fare["fares"]:
+                                            if "amount" in fare and fare["amount"] is not None:
+                                                prices.append(float(fare["amount"]))
 
                 if prices:
                     min_price = min(prices)
-                    _LOGGER.info("Pobrano cenę Ryanair (%s -> %s %s): %s %s", origin, destination, date_out, min_price, currency)
                     return {"price": min_price, "currency": currency}
                 else:
-                    _LOGGER.warning("Brak dostępnych lotów Ryanair dla %s -> %s na dzień %s", origin, destination, date_out)
+                    _LOGGER.warning("Brak lotow bezpośrednich Ryanair dla %s ➔ %s na %s", origin, destination, date_out)
             else:
-                _LOGGER.error("Błąd odpowiedzi API Ryanair: HTTP %s", response.status_code)
+                _LOGGER.error("Błąd API Ryanair: HTTP %s", response.status_code)
         except Exception as err:
             _LOGGER.error("Błąd połączenia z API Ryanair: %s", err)
-        
+
         return None
 
     coordinator = DataUpdateCoordinator(
