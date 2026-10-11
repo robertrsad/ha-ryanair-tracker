@@ -1,4 +1,4 @@
-"""Czujnik ceny Ryanair."""
+"""Czujnik ceny Ryanair z użyciem bezproblemowego API Farer."""
 from datetime import timedelta
 import logging
 import requests
@@ -10,56 +10,45 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     config = config_entry.data
-    origin = config["origin"]
-    destination = config["destination"]
-    date_out = config["date_out"]
+    origin = config["origin"].upper().strip()
+    destination = config["destination"].upper().strip()
+    date_out = config["date_out"].strip()
     interval = config.get("update_interval_minutes", 60)
 
     async def async_update_data():
-        url = (
-            f"https://www.ryanair.com/api/booking/v4/pl-pl/availability?"
-            f"ADT=1&Discount=0&Origin={origin}&Destination={destination}&DateOut={date_out}&RoundTrip=false"
-        )
+        # Używamy stabilnego publicznego API wyszukiwania lotów / taryf
+        url = f"https://www.ryanair.com/api/farer/v2/oneWayFares?departureAirportIataCode={origin}&arrivalAirportIataCode={destination}&outboundDepartureDateFrom={date_out}&outboundDepartureDateTo={date_out}"
+        
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "pl-PL,pl;q=0.9",
-            "client": "desktop",
-            "client-version": "3.100.0"
+            "Accept": "application/json"
         }
 
         def fetch():
-            return requests.get(url, headers=headers, timeout=12)
+            return requests.get(url, headers=headers, timeout=15)
 
         try:
             response = await hass.async_add_executor_job(fetch)
             if response.status_code == 200:
                 data = response.json()
-                currency = data.get("currency", "PLN")
-                trips = data.get("trips", [])
+                fares = data.get("fares", [])
                 
-                prices = []
-                if trips:
-                    for trip in trips:
-                        for date_entry in trip.get("dates", []):
-                            if date_entry.get("dateOut", "").startswith(date_out):
-                                for flight in date_entry.get("flights", []):
-                                    regular_fare = flight.get("regularFare")
-                                    if regular_fare and "fares" in regular_fare:
-                                        for fare in regular_fare["fares"]:
-                                            if "amount" in fare and fare["amount"] is not None:
-                                                prices.append(float(fare["amount"]))
-
-                if prices:
-                    min_price = min(prices)
-                    return {"price": min_price, "currency": currency}
-                else:
-                    _LOGGER.warning("Brak lotow bezpośrednich Ryanair dla %s ➔ %s na %s", origin, destination, date_out)
+                if fares:
+                    # Wyciągamy cenę z pierwszego dopasowanego lotu
+                    fare_info = fares[0].get("summary", {}).get("price", {})
+                    value = fare_info.get("value")
+                    currency = fare_info.get("currencyCode", "PLN")
+                    
+                    if value is not None:
+                        _LOGGER.info("Pobrano cenę Ryanair (%s -> %s %s): %s %s", origin, destination, date_out, value, currency)
+                        return {"price": float(value), "currency": currency}
+                
+                _LOGGER.warning("Brak rozkładowych lotów Ryanair dla %s -> %s na dzień %s", origin, destination, date_out)
             else:
-                _LOGGER.error("Błąd API Ryanair: HTTP %s", response.status_code)
+                _LOGGER.error("API Ryanair (farer) zwróciło HTTP status %s", response.status_code)
         except Exception as err:
             _LOGGER.error("Błąd połączenia z API Ryanair: %s", err)
-
+        
         return None
 
     coordinator = DataUpdateCoordinator(
