@@ -20,9 +20,9 @@ class RyanairConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             destination = user_input["destination"].upper().strip()
             date_out = user_input["date_out"].strip()
             interval = user_input.get("update_interval_minutes", 60)
-            
+
             title = f"{origin} ➔ {destination} ({date_out})"
-            
+
             return self.async_create_entry(
                 title=title,
                 data={
