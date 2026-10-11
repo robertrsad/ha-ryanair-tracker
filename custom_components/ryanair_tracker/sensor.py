@@ -1,4 +1,4 @@
-"""Czujnik ceny Ryanair."""
+"""Czujnik ceny Ryanair z obsługą waluty i błędów."""
 from datetime import timedelta
 import logging
 import requests
@@ -10,47 +10,56 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     config = config_entry.data
-    origin = config["origin"]
-    destination = config["destination"]
-    date_out = config["date_out"]
+    origin = config["origin"].upper().strip()
+    destination = config["destination"].upper().strip()
+    date_out = config["date_out"].strip()
     interval = config.get("update_interval_minutes", 60)
 
     async def async_update_data():
-        # Używamy oficjalnego API z elastycznym zakresem wokół podanej daty
         url = (
             f"https://www.ryanair.com/api/booking/v4/pl-pl/availability?"
             f"ADT=1&Discount=0&Origin={origin}&Destination={destination}&DateOut={date_out}&RoundTrip=false"
         )
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7"
         }
 
         def fetch():
-            return requests.get(url, headers=headers, timeout=10)
+            return requests.get(url, headers=headers, timeout=12)
 
         try:
             response = await hass.async_add_executor_job(fetch)
             if response.status_code == 200:
                 data = response.json()
+                currency = data.get("currency", "PLN")
                 trips = data.get("trips", [])
+                
+                prices = []
                 if trips and "dates" in trips[0]:
-                    prices = []
                     for date_entry in trips[0]["dates"]:
-                        # Sprawdzamy czy dany dzień zgadza się z naszą datą (lub bierzemy dostępne loty)
-                        flights = date_entry.get("flights", [])
-                        for flight in flights:
-                            if "regularFare" in flight and "fares" in flight["regularFare"]:
-                                for fare in flight["regularFare"]["fares"]:
-                                    if "amount" in fare:
-                                        prices.append(float(fare["amount"]))
-                    
-                    if prices:
-                        # Zwraca najniższą cenę spośród dostępnych lotów tego dnia
-                        return min(prices)
-            _LOGGER.warning("Nie znaleziono lotów dla %s -> %s na dzień %s (HTTP %s)", origin, destination, date_out, response.status_code)
+                        # Szukamy odczytów dla wybranego dnia
+                        if date_entry.get("dateOut", "").startswith(date_out):
+                            flights = date_entry.get("flights", [])
+                            for flight in flights:
+                                regular_fare = flight.get("regularFare")
+                                if regular_fare and "fares" in regular_fare:
+                                    for fare in regular_fare["fares"]:
+                                        if "amount" in fare:
+                                            prices.append(float(fare["amount"]))
+
+                if prices:
+                    min_price = min(prices)
+                    _LOGGER.info("Pobrano cenę Ryanair (%s -> %s %s): %s %s", origin, destination, date_out, min_price, currency)
+                    return {"price": min_price, "currency": currency}
+                else:
+                    _LOGGER.warning("Brak dostępnych lotów Ryanair dla %s -> %s na dzień %s", origin, destination, date_out)
+            else:
+                _LOGGER.error("Błąd odpowiedzi API Ryanair: HTTP %s", response.status_code)
         except Exception as err:
-            _LOGGER.error("Błąd podczas pobierania danych z Ryanair: %s", err)
+            _LOGGER.error("Błąd połączenia z API Ryanair: %s", err)
+        
         return None
 
     coordinator = DataUpdateCoordinator(
@@ -72,10 +81,17 @@ class RyanairSensor(CoordinatorEntity, SensorEntity):
         self._date_out = date_out
         self._attr_name = f"Cena Ryanair {origin} ➔ {destination}"
         self._attr_unique_id = f"ryanair_{origin}_{destination}_{date_out}_{entry_id}"
-        self._attr_native_unit_of_measurement = "PLN"
         self._attr_icon = "mdi:airplane"
         self._attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
     def native_value(self):
-        return self.coordinator.data
+        if self.coordinator.data and "price" in self.coordinator.data:
+            return self.coordinator.data["price"]
+        return None
+
+    @property
+    def native_unit_of_measurement(self):
+        if self.coordinator.data and "currency" in self.coordinator.data:
+            return self.coordinator.data["currency"]
+        return "PLN"
