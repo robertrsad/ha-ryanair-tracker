@@ -1,0 +1,15 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Konfiguracja lotu Ryanair",
+        "description": "Wprowadź kody lotnisk oraz datę lotu.",
+        "data": {
+          "origin": "Lotnisko wylotu (np. KRK)",
+          "destination": "Lotnisko docelowe (np. TFS)",
+          "date_out": "Data wylotu (YYYY-MM-DD)"
+        }
+      }
+    }
+  }
+}
